@@ -22,38 +22,8 @@ fn parse_numeric_ordinal(s: &str) -> Option<u32> {
     }
 }
 
-fn parse_tens_base(word: &str) -> Option<u32> {
-    match word {
-        "twenty" => Some(20),
-        "thirty" => Some(30),
-        "forty" => Some(40),
-        "fifty" => Some(50),
-        "sixty" => Some(60),
-        "seventy" => Some(70),
-        "eighty" => Some(80),
-        "ninety" => Some(90),
-        _ => None,
-    }
-}
-
-fn parse_units_ordinal(word: &str) -> Option<u32> {
-    match word {
-        "first" => Some(1),
-        "second" => Some(2),
-        "third" => Some(3),
-        "fourth" => Some(4),
-        "fifth" => Some(5),
-        "sixth" => Some(6),
-        "seventh" => Some(7),
-        "eighth" => Some(8),
-        "ninth" => Some(9),
-        _ => None,
-    }
-}
-
 fn parse_word_ordinal(s: &str) -> Option<u32> {
     match s {
-        // Handle 1-20 directly
         "first" => Some(1),
         "second" => Some(2),
         "third" => Some(3),
@@ -74,14 +44,7 @@ fn parse_word_ordinal(s: &str) -> Option<u32> {
         "eighteenth" => Some(18),
         "nineteenth" => Some(19),
         "twentieth" => Some(20),
-        // Handle compound patterns
-        _ => parse_compound_ordinal(s),
-    }
-}
 
-fn parse_tens_ordinal(word: &str) -> Option<u32> {
-    match word {
-        "twentieth" => Some(20),
         "thirtieth" => Some(30),
         "fortieth" => Some(40),
         "fiftieth" => Some(50),
@@ -89,7 +52,8 @@ fn parse_tens_ordinal(word: &str) -> Option<u32> {
         "seventieth" => Some(70),
         "eightieth" => Some(80),
         "ninetieth" => Some(90),
-        _ => None,
+
+        _ => parse_compound_ordinal(s),
     }
 }
 
@@ -98,15 +62,37 @@ fn parse_compound_ordinal(s: &str) -> Option<u32> {
         let tens_part = &s[..hyphen_pos];
         let units_part = &s[hyphen_pos+1..];
 
-        let tens_value = parse_tens_base(tens_part)?;
-        let units_value = parse_units_ordinal(units_part)?;
+        let tens_value = match tens_part {
+            "twenty" => 20,
+            "thirty" => 30,
+            "forty" => 40,
+            "fifty" => 50,
+            "sixty" => 60,
+            "seventy" => 70,
+            "eighty" => 80,
+            "ninety" => 90,
+            _ => return None,
+        };
+
+        let units_value = match units_part {
+            "first" => 1,
+            "second" => 2,
+            "third" => 3,
+            "fourth" => 4,
+            "fifth" => 5,
+            "sixth" => 6,
+            "seventh" => 7,
+            "eighth" => 8,
+            "ninth" => 9,
+            _ => return None,
+        };
 
         Some(tens_value + units_value)
-    }
-    else {
-        parse_tens_ordinal(s)
+    } else {
+        None
     }
 }
+
 
 pub fn build_ast_from(str: &str) -> Result<HumanTime, ParseError> {
     let result = DateTimeParser::parse(Rule::HumanTime, &str)

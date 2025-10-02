@@ -592,6 +592,7 @@ fn resolve_datetime_reference(
 ) -> Result<NaiveDateTime, ProcessingError> {
     match datetime_reference {
         DateTimeReference::MonthYear(month_spec, year_spec) => {
+            let target_year = match year_spec {
                 None => now.year(),
                 Some(YearSpec::Relative(RelativeSpecifier::This)) => now.year(),
                 Some(YearSpec::Relative(RelativeSpecifier::Next)) => now.year() + 1,
