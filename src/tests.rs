@@ -129,7 +129,94 @@ generate_test_cases!(
     "12 hours ago at 04:00" = "2009-12-31 16:00:00",
     "12 hours ago at today" = "2009-12-31 12:00:00",
     "12 hours ago at 7 days ago" = "2009-12-24 12:00:00",
-    "7 days ago at 7 days ago" = "2009-12-18 00:00:00"
+    "7 days ago at 7 days ago" = "2009-12-18 00:00:00",
+    "first day of april" = "2010-04-01 00:00:00",
+    "last day of february" = "2010-02-28 00:00:00",
+    "15th day of july" = "2010-07-15 00:00:00",
+    "first day of next april" = "2011-04-01 00:00:00",
+    "last day of last december" = "2009-12-31 00:00:00",
+    "first day of april next year" = "2011-04-01 00:00:00",
+    "last day of march last year" = "2009-03-31 00:00:00",
+    "1st day of january" = "2010-01-01 00:00:00",
+    "31st day of december" = "2010-12-31 00:00:00",
+    "first day of the month" = "2010-01-01 00:00:00",
+    "last day of the month" = "2010-01-31 00:00:00",
+    "15th day of month" = "2010-01-15 00:00:00",
+    "1st day of last month" = "2009-12-01 00:00:00",
+    "last day of last month" = "2009-12-31 00:00:00",
+    "first day of next month" = "2010-02-01 00:00:00",
+    "31st day of last month" = "2009-12-31 00:00:00",
+    "2nd day of 2 months ago" = "2009-11-02 00:00:00",
+    "3rd day of next week" = "2010-01-03 00:00:00",
+    "1st hour of tomorrow" = "2010-01-02 00:00:00",
+    "last day of next year" = "2011-12-31 00:00:00",
+    "last day of last year" = "2009-12-31 00:00:00",
+    "2nd week of next month" = "2010-02-08 00:00:00",
+    "15th day of this month" = "2010-01-15 00:00:00",
+    "1st day of last week" = "2009-12-20 00:00:00",
+    "second day of the year" = "2010-01-02 00:00:00",
+    "third day of next month" = "2010-02-03 00:00:00",
+    "fifth day of last month" = "2009-12-05 00:00:00",
+    "second day of last week" = "2009-12-21 00:00:00",
+    "twenty-first day of the year" = "2010-01-21 00:00:00",
+    "thirty-second day of the year" = "2010-02-01 00:00:00",
+    "fortieth day of the year" = "2010-02-09 00:00:00",
+    "fiftieth day of the year" = "2010-02-19 00:00:00",
+    "sixtieth day of the year" = "2010-03-01 00:00:00",
+    "seventieth day of the year" = "2010-03-11 00:00:00",
+    "eightieth day of the year" = "2010-03-21 00:00:00",
+    "ninetieth day of the year" = "2010-03-31 00:00:00"
 );
 
-generate_test_cases_error!("2023-11-31");
+#[test]
+fn test_week_start_monday_config() {
+    let now = NaiveDateTime::new(
+        NaiveDate::from_ymd_opt(2010, 1, 1).unwrap(), 
+        NaiveTime::from_hms_opt(0, 0, 0).unwrap()
+    );
+    
+    let config = crate::ParseConfig {
+        week_start_day: crate::WeekStartDay::Monday,
+    };
+    
+    // With Monday as first day, "1st day of last week" should be Monday
+    let result = crate::from_human_time_with_config("1st day of last week", now, config).unwrap();
+    let expected = NaiveDateTime::parse_from_str("2009-12-21 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+    
+    if let crate::ParseResult::Date(date) = result {
+        let result_dt = NaiveDateTime::new(date, NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+        assert!((result_dt - expected).abs() < chrono::Duration::milliseconds(10));
+    } else {
+        panic!("Expected Date result");
+    }
+}
+
+#[test]
+fn test_week_start_sunday_config() {
+    let now = NaiveDateTime::new(
+        NaiveDate::from_ymd_opt(2010, 1, 1).unwrap(), 
+        NaiveTime::from_hms_opt(0, 0, 0).unwrap()
+    );
+    
+    let config = crate::ParseConfig {
+        week_start_day: crate::WeekStartDay::Sunday,
+    };
+    
+    // With Sunday as first day, "1st day of last week" should be Sunday
+    let result = crate::from_human_time_with_config("1st day of last week", now, config).unwrap();
+    let expected = NaiveDateTime::parse_from_str("2009-12-20 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+    
+    if let crate::ParseResult::Date(date) = result {
+        let result_dt = NaiveDateTime::new(date, NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+        assert!((result_dt - expected).abs() < chrono::Duration::milliseconds(10));
+    } else {
+        panic!("Expected Date result");
+    }
+}
+
+generate_test_cases_error!(
+    "2023-11-31",
+    "31st day of february",
+    "30th day of february",
+    "32nd day of january"
+);

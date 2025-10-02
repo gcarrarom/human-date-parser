@@ -7,6 +7,107 @@ use crate::{InternalError, ParseError};
 type ParserResult<T> = std::result::Result<T, Error<Rule>>;
 type Node<'i> = pest_consume::Node<'i, Rule, ()>;
 
+fn ordinal_from_str(s: &str) -> Option<u32> {
+    let s = s.to_ascii_lowercase();
+    if let Some(n) = parse_numeric_ordinal(&s) { return Some(n); }
+    if let Some(n) = parse_word_ordinal(&s) { return Some(n); }
+    None
+}
+
+fn parse_numeric_ordinal(s: &str) -> Option<u32> {
+    if s.ends_with("st") || s.ends_with("nd") || s.ends_with("rd") || s.ends_with("th") {
+        s[..s.len()-2].parse().ok()
+    } else {
+        None
+    }
+}
+
+fn parse_tens_base(word: &str) -> Option<u32> {
+    match word {
+        "twenty" => Some(20),
+        "thirty" => Some(30),
+        "forty" => Some(40),
+        "fifty" => Some(50),
+        "sixty" => Some(60),
+        "seventy" => Some(70),
+        "eighty" => Some(80),
+        "ninety" => Some(90),
+        _ => None,
+    }
+}
+
+fn parse_units_ordinal(word: &str) -> Option<u32> {
+    match word {
+        "first" => Some(1),
+        "second" => Some(2),
+        "third" => Some(3),
+        "fourth" => Some(4),
+        "fifth" => Some(5),
+        "sixth" => Some(6),
+        "seventh" => Some(7),
+        "eighth" => Some(8),
+        "ninth" => Some(9),
+        _ => None,
+    }
+}
+
+fn parse_word_ordinal(s: &str) -> Option<u32> {
+    match s {
+        // Handle 1-20 directly
+        "first" => Some(1),
+        "second" => Some(2),
+        "third" => Some(3),
+        "fourth" => Some(4),
+        "fifth" => Some(5),
+        "sixth" => Some(6),
+        "seventh" => Some(7),
+        "eighth" => Some(8),
+        "ninth" => Some(9),
+        "tenth" => Some(10),
+        "eleventh" => Some(11),
+        "twelfth" => Some(12),
+        "thirteenth" => Some(13),
+        "fourteenth" => Some(14),
+        "fifteenth" => Some(15),
+        "sixteenth" => Some(16),
+        "seventeenth" => Some(17),
+        "eighteenth" => Some(18),
+        "nineteenth" => Some(19),
+        "twentieth" => Some(20),
+        // Handle compound patterns
+        _ => parse_compound_ordinal(s),
+    }
+}
+
+fn parse_tens_ordinal(word: &str) -> Option<u32> {
+    match word {
+        "twentieth" => Some(20),
+        "thirtieth" => Some(30),
+        "fortieth" => Some(40),
+        "fiftieth" => Some(50),
+        "sixtieth" => Some(60),
+        "seventieth" => Some(70),
+        "eightieth" => Some(80),
+        "ninetieth" => Some(90),
+        _ => None,
+    }
+}
+
+fn parse_compound_ordinal(s: &str) -> Option<u32> {
+    if let Some(hyphen_pos) = s.find('-') {
+        let tens_part = &s[..hyphen_pos];
+        let units_part = &s[hyphen_pos+1..];
+
+        let tens_value = parse_tens_base(tens_part)?;
+        let units_value = parse_units_ordinal(units_part)?;
+
+        Some(tens_value + units_value)
+    }
+    else {
+        parse_tens_ordinal(s)
+    }
+}
+
 pub fn build_ast_from(str: &str) -> Result<HumanTime, ParseError> {
     let result = DateTimeParser::parse(Rule::HumanTime, &str)
         .and_then(|result| result.single())
@@ -59,6 +160,7 @@ impl DateTimeParser {
             [RelativeSpecifier(r), TimeUnit(tu)] => Date::RelativeTimeUnit(r, tu),
             [RelativeSpecifier(r), Weekday(wd)] => Date::RelativeWeekday(r, wd),
             [Weekday(wd)] => Date::UpcomingWeekday(wd),
+            [OrdinalTimeUnitOf((ordinal, time_unit, datetime_ref))] => Date::OrdinalTimeUnitOf(ordinal, time_unit, datetime_ref),
         ))
     }
 
@@ -220,6 +322,59 @@ impl DateTimeParser {
             Err(input.error("Unreachable"))
         }
     }
+
+    fn OrdinalTimeUnitOf(input: Node) -> ParserResult<(Ordinal, TimeUnit, DateTimeReference)> {
+        Ok(match_nodes!(input.into_children();
+            [Ordinal(ordinal), TimeUnit(time_unit), DateTimeReference(datetime_ref)] => (ordinal, time_unit, datetime_ref),
+        ))
+    }
+
+    fn DateTimeReference(input: Node) -> ParserResult<DateTimeReference> {
+        Ok(match_nodes!(input.into_children();
+            [MonthSpec(month_spec)] => DateTimeReference::MonthYear(month_spec, None),
+            [MonthSpec(month_spec), YearSpec(year_spec)] => DateTimeReference::MonthYear(month_spec, Some(year_spec)),
+            [Duration(duration)] => DateTimeReference::Ago(duration),
+            [RelativeSpecifier(relative), TimeUnit(time_unit)] => DateTimeReference::RelativeTimeUnit(relative, time_unit),
+            [TimeUnit(time_unit)] => DateTimeReference::TheTimeUnit(time_unit),
+            [Today(_)] => DateTimeReference::Today,
+            [Tomorrow(_)] => DateTimeReference::Tomorrow,
+            [Yesterday(_)] => DateTimeReference::Yesterday,
+            [Overmorrow(_)] => DateTimeReference::Overmorrow,
+            [Now(_)] => DateTimeReference::Now,
+        ))
+    }
+
+    fn Ordinal(input: Node) -> ParserResult<Ordinal> {
+        let text = input.as_str();
+        match text.to_ascii_lowercase().as_str() {
+            "last" => Ok(Ordinal::Last),
+            _ => ordinal_from_str(text)
+                .map(|n| if n == 1 { Ordinal::First } else { Ordinal::Nth(n) })
+                .ok_or_else(|| input.error("Invalid ordinal"))
+        }
+    }
+
+
+
+    fn MonthSpec(input: Node) -> ParserResult<MonthSpec> {
+        let text = input.as_str();
+        if text == "month" || text == "the month" {
+            Ok(MonthSpec::Current)
+        } else {
+            Ok(match_nodes!(input.into_children();
+                [Month_Name(month)] => MonthSpec::Absolute(month),
+                [RelativeSpecifier(relative), Month_Name(month)] => MonthSpec::Relative(relative, month),
+                [RelativeSpecifier(relative)] => MonthSpec::RelativeCurrent(relative),
+            ))
+        }
+    }
+
+    fn YearSpec(input: Node) -> ParserResult<YearSpec> {
+        Ok(match_nodes!(input.into_children();
+            [RelativeSpecifier(relative)] => YearSpec::Relative(relative),
+            [Num(year)] => YearSpec::Absolute(year),
+        ))
+    }
 }
 
 #[derive(Debug)]
@@ -258,6 +413,7 @@ pub enum Date {
     RelativeTimeUnit(RelativeSpecifier, TimeUnit),
     RelativeWeekday(RelativeSpecifier, Weekday),
     UpcomingWeekday(Weekday),
+    OrdinalTimeUnitOf(Ordinal, TimeUnit, DateTimeReference),
 }
 
 #[derive(Debug)]
@@ -284,13 +440,13 @@ pub enum Ago {
     AgoFromTime(Duration, Box<HumanTime>),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Duration(pub Vec<Quantifier>);
 
 #[derive(Debug)]
 struct Now;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum RelativeSpecifier {
     This,
     Next,
@@ -304,7 +460,7 @@ struct Next;
 #[derive(Debug)]
 struct Last;
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Quantifier {
     Year(u32),
     Month(u32),
@@ -315,7 +471,7 @@ pub enum Quantifier {
     Second(u32),
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum TimeUnit {
     Year,
     Month,
@@ -353,3 +509,37 @@ impl From<Weekday> for chrono::Weekday {
 
 #[derive(Debug)]
 struct Week {}
+
+#[derive(Debug)]
+pub enum Ordinal {
+    First,
+    Last,
+    Nth(u32),
+}
+
+#[derive(Debug)]
+pub enum MonthSpec {
+    Absolute(Month),
+    Relative(RelativeSpecifier, Month),
+    RelativeCurrent(RelativeSpecifier),
+    Current,
+}
+
+#[derive(Debug)]
+pub enum YearSpec {
+    Relative(RelativeSpecifier),
+    Absolute(u32),
+}
+
+#[derive(Debug)]
+pub enum DateTimeReference {
+    MonthYear(MonthSpec, Option<YearSpec>),
+    Ago(Duration),
+    RelativeTimeUnit(RelativeSpecifier, TimeUnit),
+    TheTimeUnit(TimeUnit),
+    Today,
+    Tomorrow,
+    Yesterday,
+    Overmorrow,
+    Now,
+}

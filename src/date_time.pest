@@ -13,6 +13,7 @@ DateTime = {
 }
 IsoDate = ${ Num ~ "-" ~ Num ~ "-" ~ Num }
 Date = {
+    | OrdinalTimeUnitOf
     | Today
     | Tomorrow
     | Overmorrow
@@ -188,5 +189,59 @@ December = {
     | "dec"
 }
 
+
+OrdinalTimeUnitOf = { 
+    Ordinal ~ TimeUnit ~ "of" ~ DateTimeReference
+}
+
+DateTimeReference = {
+    | MonthSpec ~ YearSpec?
+    | Duration ~ AgoLiteral
+    | RelativeSpecifier ~ TimeUnit
+    | "the" ~ TimeUnit
+    | Today
+    | Tomorrow  
+    | Yesterday
+    | Overmorrow
+    | Now
+}
+
+Ordinal = { 
+    | "last" 
+    | NumericOrdinal 
+    | WordOrdinal 
+}
+
+NumericOrdinal = @{ ASCII_DIGIT+ ~ ("st" | "nd" | "rd" | "th") }
+
+WordOrdinal = _{
+    OneToTwenty
+  | TensOrdinal                    // fortieth, fiftieth, etc.
+  | Tens ~ "-"? ~ UnitOrdinal      // twenty-first
+  | Tens ~ "ieth"                  // twentieth
+}
+
+OneToTwenty = @{
+      "first" | "second" | "third" | "fourth" | "fifth"
+    | "sixth" | "seventh" | "eighth" | "ninth" | "tenth"
+    | "eleventh" | "twelfth" | "thirteenth" | "fourteenth" | "fifteenth"
+    | "sixteenth" | "seventeenth" | "eighteenth" | "nineteenth" | "twentieth"
+}
+
+Tens = @{ "twenty" | "thirty" | "forty" | "fifty" | "sixty" | "seventy" | "eighty" | "ninety" }
+TensOrdinal = @{ "thirtieth" | "fortieth" | "fiftieth" | "sixtieth" | "seventieth" | "eightieth" | "ninetieth" }
+UnitOrdinal = @{ "first" | "second" | "third" | "fourth" | "fifth" | "sixth" | "seventh" | "eighth" | "ninth" }
+
+MonthSpec = { 
+    | RelativeSpecifier ~ Month_Name 
+    | RelativeSpecifier ~ "month"
+    | Month_Name
+    | ("the")? ~ "month"
+}
+
+YearSpec = { 
+    | RelativeSpecifier ~ "year"
+    | "year" ~ Num
+}
 
 WHITESPACE = _{ " " }

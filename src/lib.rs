@@ -2,13 +2,32 @@ use std::fmt::Display;
 
 use ast::{
     build_ast_from, Ago, Date, DateTime, Duration as AstDuration, In, IsoDate, Quantifier,
-    RelativeSpecifier, Time, TimeUnit,
+    RelativeSpecifier, Time, TimeUnit, Ordinal, DateTimeReference, MonthSpec, YearSpec,
 };
 use chrono::{
     Datelike, Days, Duration as ChronoDuration, Month, Months, NaiveDate, NaiveDateTime,
     NaiveTime, Weekday,
 };
 use thiserror::Error;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParseConfig {
+    pub week_start_day: WeekStartDay,
+}
+
+impl Default for ParseConfig {
+    fn default() -> Self {
+        Self {
+            week_start_day: WeekStartDay::Sunday,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WeekStartDay {
+    Sunday,
+    Monday,
+}
 
 mod ast;
 #[cfg(test)]
@@ -130,18 +149,54 @@ impl Display for ParseResult {
 /// }
 /// ```
 pub fn from_human_time(str: &str, now: NaiveDateTime) -> Result<ParseResult, ParseError> {
+    from_human_time_with_config(str, now, ParseConfig::default())
+}
+
+/// Parse a human-readable time string with custom configuration
+///
+/// This function allows you to customize parsing behavior, such as choosing
+/// which day is considered the first day of the week for ordinal calculations.
+///
+/// # Arguments
+///
+/// * `str` - A string containing a human-readable date or time
+/// * `now` - The current date and time, used as a reference point for relative dates
+/// * `config` - Configuration options for parsing behavior
+///
+/// # Examples
+///
+/// ```
+/// use chrono::{NaiveDateTime, NaiveDate, NaiveTime};
+/// use human_date_parser::{from_human_time_with_config, ParseConfig, WeekStartDay, ParseResult};
+///
+/// let now = NaiveDateTime::new(
+///     NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+///     NaiveTime::from_hms_opt(12, 0, 0).unwrap()
+/// );
+///
+/// // Default config (Sunday as first day of week)
+/// let config = ParseConfig::default();
+/// let result = from_human_time_with_config("1st day of last week", now, config).unwrap();
+///
+/// // Custom config (Monday as first day of week)
+/// let config = ParseConfig {
+///     week_start_day: WeekStartDay::Monday,
+/// };
+/// let result = from_human_time_with_config("1st day of last week", now, config).unwrap();
+/// ```
+pub fn from_human_time_with_config(str: &str, now: NaiveDateTime, config: ParseConfig) -> Result<ParseResult, ParseError> {
     let lowercase = str.to_lowercase();
     let parsed = build_ast_from(&lowercase)?;
 
-    parse_human_time(parsed, now)
+    parse_human_time(parsed, now, config)
 }
 
-fn parse_human_time(parsed: ast::HumanTime, now: NaiveDateTime) -> Result<ParseResult, ParseError> {
+fn parse_human_time(parsed: ast::HumanTime, now: NaiveDateTime, config: ParseConfig) -> Result<ParseResult, ParseError> {
     match parsed {
         ast::HumanTime::DateTime(date_time) => {
-            parse_date_time(date_time, &now).map(|dt| ParseResult::DateTime(dt))
+            parse_date_time(date_time, &now, config).map(|dt| ParseResult::DateTime(dt))
         }
-        ast::HumanTime::Date(date) => parse_date(date, &now)
+        ast::HumanTime::Date(date) => parse_date(date, &now, config)
             .map(|date| ParseResult::Date(date))
             .map_err(|err| ParseError::ProccessingErrors(vec![err])),
         ast::HumanTime::Time(time) => parse_time(time)
@@ -150,15 +205,15 @@ fn parse_human_time(parsed: ast::HumanTime, now: NaiveDateTime) -> Result<ParseR
         ast::HumanTime::In(in_ast) => parse_in(in_ast, &now)
             .map(|time| ParseResult::DateTime(time))
             .map_err(|err| ParseError::ProccessingErrors(vec![err])),
-        ast::HumanTime::Ago(ago) => parse_ago(ago, &now)
+        ast::HumanTime::Ago(ago) => parse_ago(ago, &now, config)
             .map(|time| ParseResult::DateTime(time))
             .map_err(|err| ParseError::ProccessingErrors(vec![err])),
         ast::HumanTime::Now => Ok(ParseResult::DateTime(now)),
     }
 }
 
-fn parse_date_time(date_time: DateTime, now: &NaiveDateTime) -> Result<NaiveDateTime, ParseError> {
-    let date = parse_date(date_time.date, now);
+fn parse_date_time(date_time: DateTime, now: &NaiveDateTime, config: ParseConfig) -> Result<NaiveDateTime, ParseError> {
+    let date = parse_date(date_time.date, now, config);
     let time = parse_time(date_time.time);
 
     match (date, time) {
@@ -171,7 +226,7 @@ fn parse_date_time(date_time: DateTime, now: &NaiveDateTime) -> Result<NaiveDate
     }
 }
 
-fn parse_date(date: Date, now: &NaiveDateTime) -> Result<NaiveDate, ProcessingError> {
+fn parse_date(date: Date, now: &NaiveDateTime, config: ParseConfig) -> Result<NaiveDate, ProcessingError> {
     match date {
         Date::Today => Ok(now.date()),
         Date::Tomorrow => {
@@ -212,6 +267,9 @@ fn parse_date(date: Date, now: &NaiveDateTime) -> Result<NaiveDate, ProcessingEr
         }
         Date::UpcomingWeekday(weekday) => {
             find_weekday_relative(RelativeSpecifier::Next, weekday.into(), now.date())
+        }
+        Date::OrdinalTimeUnitOf(ordinal, time_unit, datetime_reference) => {
+            parse_ordinal_time_unit_of(&ordinal, &time_unit, &datetime_reference, now, config)
         }
     }
 }
@@ -254,14 +312,14 @@ fn parse_in(in_ast: In, now: &NaiveDateTime) -> Result<NaiveDateTime, Processing
     apply_duration(in_ast.0, dt, Direction::Forwards)
 }
 
-fn parse_ago(ago: Ago, now: &NaiveDateTime) -> Result<NaiveDateTime, ProcessingError> {
+fn parse_ago(ago: Ago, now: &NaiveDateTime, config: ParseConfig) -> Result<NaiveDateTime, ProcessingError> {
     match ago {
         Ago::AgoFromNow(ago) => {
             let dt = now.clone();
             apply_duration(ago, dt, Direction::Backwards)
         }
         Ago::AgoFromTime(ago, time) => {
-            let human_time = parse_human_time(*time, now.clone())
+            let human_time = parse_human_time(*time, now.clone(), config)
                 .map_err(|e| ProcessingError::InnerHumanTimeParse(Box::new(e)))?;
             let dt = match human_time {
                 ParseResult::DateTime(dt) => dt,
@@ -486,4 +544,300 @@ fn find_weekday_relative(
                 })
         }
     }
+}
+
+fn parse_ordinal_time_unit_of(
+    ordinal: &Ordinal,
+    time_unit: &TimeUnit,
+    datetime_reference: &DateTimeReference,
+    now: &NaiveDateTime,
+    config: ParseConfig,
+) -> Result<NaiveDate, ProcessingError> {
+    let base_datetime = resolve_datetime_reference(datetime_reference, now)?;
+
+    if let (TimeUnit::Day, DateTimeReference::RelativeTimeUnit(_, TimeUnit::Year)) = (time_unit, datetime_reference) {
+        return apply_ordinal_to_years(ordinal, base_datetime);
+    }
+
+    if let (TimeUnit::Day, DateTimeReference::TheTimeUnit(TimeUnit::Year)) = (time_unit, datetime_reference) {
+        return apply_ordinal_to_years(ordinal, base_datetime);
+    }
+
+    if let (TimeUnit::Day, DateTimeReference::RelativeTimeUnit(RelativeSpecifier::Last, TimeUnit::Week)) = (time_unit, datetime_reference) {
+        return apply_ordinal_to_weeks(ordinal, base_datetime, config);
+    }
+
+    if let (TimeUnit::Week, DateTimeReference::RelativeTimeUnit(_, TimeUnit::Month)) = (time_unit, datetime_reference) {
+        return apply_ordinal_to_weeks_of_month(ordinal, base_datetime);
+    }
+
+    if let (TimeUnit::Week, DateTimeReference::MonthYear(_, _)) = (time_unit, datetime_reference) {
+        return apply_ordinal_to_weeks_of_month(ordinal, base_datetime);
+    }
+
+    match time_unit {
+        TimeUnit::Day => apply_ordinal_to_days(ordinal, base_datetime),
+        TimeUnit::Week => apply_ordinal_to_weeks(ordinal, base_datetime, config),
+        TimeUnit::Month => apply_ordinal_to_months(ordinal, base_datetime),
+        TimeUnit::Year => apply_ordinal_to_years(ordinal, base_datetime),
+        TimeUnit::Hour | TimeUnit::Minute | TimeUnit::Second => {
+            apply_ordinal_to_subday_units(ordinal, time_unit, base_datetime)
+        }
+    }
+}
+
+fn resolve_datetime_reference(
+    datetime_reference: &DateTimeReference,
+    now: &NaiveDateTime,
+) -> Result<NaiveDateTime, ProcessingError> {
+    match datetime_reference {
+        DateTimeReference::MonthYear(month_spec, year_spec) => {
+                None => now.year(),
+                Some(YearSpec::Relative(RelativeSpecifier::This)) => now.year(),
+                Some(YearSpec::Relative(RelativeSpecifier::Next)) => now.year() + 1,
+                Some(YearSpec::Relative(RelativeSpecifier::Last)) => now.year() - 1,
+                Some(YearSpec::Absolute(year)) => *year as i32,
+            };
+
+            let (target_month, final_year) = match month_spec {
+                MonthSpec::Absolute(month) => (month.number_from_month(), target_year),
+                MonthSpec::Current => (now.month(), target_year),
+                MonthSpec::RelativeCurrent(relative) => {
+                    let current_month = now.month();
+                    match relative {
+                        RelativeSpecifier::This => (current_month, target_year),
+                        RelativeSpecifier::Next => {
+                            if current_month == 12 {
+                                (1, target_year + 1)
+                            } else {
+                                (current_month + 1, target_year)
+                            }
+                        },
+                        RelativeSpecifier::Last => {
+                            if current_month == 1 {
+                                (12, target_year - 1)
+                            } else {
+                                (current_month - 1, target_year)
+                            }
+                        }
+                    }
+                },
+                MonthSpec::Relative(relative, month) => {
+                    let month_num = month.number_from_month();
+                    match relative {
+                        RelativeSpecifier::This => (month_num, target_year),
+                        RelativeSpecifier::Next => (month_num, target_year + 1),
+                        RelativeSpecifier::Last => {
+                            if now.month() <= month_num {
+                                (month_num, target_year - 1)
+                            } else {
+                                (month_num, target_year)
+                            }
+                        }
+                    }
+                }
+            };
+
+            Ok(NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(final_year, target_month, 1)
+                    .ok_or(ProcessingError::InvalidDate { year: final_year, month: target_month, day: 1 })?,
+                NaiveTime::from_hms_opt(0, 0, 0).unwrap()
+            ))
+        },
+        DateTimeReference::Ago(duration) => {
+            apply_duration(duration.clone(), *now, Direction::Backwards)
+                .map_err(|_| ProcessingError::SubtractFromNow { unit: "duration".to_string(), count: 1 })
+        },
+        DateTimeReference::RelativeTimeUnit(relative, time_unit) => {
+            Ok(relative_date_time_unit(*relative, *time_unit, *now)?)
+        },
+        DateTimeReference::TheTimeUnit(_time_unit) => {
+            Ok(*now)
+        },
+        DateTimeReference::Today => Ok(*now),
+        DateTimeReference::Tomorrow => {
+            Ok(*now + ChronoDuration::days(1))
+        },
+        DateTimeReference::Yesterday => {
+            Ok(*now - ChronoDuration::days(1))
+        },
+        DateTimeReference::Overmorrow => {
+            Ok(*now + ChronoDuration::days(2))
+        },
+        DateTimeReference::Now => Ok(*now),
+    }
+}
+
+fn apply_ordinal_to_days(ordinal: &Ordinal, base_datetime: NaiveDateTime) -> Result<NaiveDate, ProcessingError> {
+    let base_date = base_datetime.date();
+    let target_day = match ordinal {
+        Ordinal::First => 1,
+        Ordinal::Last => {
+            let next_month = if base_date.month() == 12 {
+                NaiveDate::from_ymd_opt(base_date.year() + 1, 1, 1)
+            } else {
+                NaiveDate::from_ymd_opt(base_date.year(), base_date.month() + 1, 1)
+            };
+            match next_month {
+                Some(date) => (date - Days::new(1)).day(),
+                None => return Err(ProcessingError::InvalidDate {
+                    year: base_date.year(), month: base_date.month(), day: 1
+                })
+            }
+        },
+        Ordinal::Nth(n) => *n,
+    };
+
+    NaiveDate::from_ymd_opt(base_date.year(), base_date.month(), target_day)
+        .ok_or(ProcessingError::InvalidDate {
+            year: base_date.year(),
+            month: base_date.month(),
+            day: target_day,
+        })
+}
+
+fn apply_ordinal_to_weeks(ordinal: &Ordinal, base_datetime: NaiveDateTime, config: ParseConfig) -> Result<NaiveDate, ProcessingError> {
+    let base_date = base_datetime.date();
+
+    let days_from_week_start = match config.week_start_day {
+        WeekStartDay::Sunday => base_date.weekday().num_days_from_sunday() as i64,
+        WeekStartDay::Monday => base_date.weekday().num_days_from_monday() as i64,
+    };
+
+    let week_start = base_date.checked_sub_days(Days::new(days_from_week_start as u64))
+        .ok_or(ProcessingError::SubtractFromNow {
+            unit: "days".to_string(),
+            count: days_from_week_start as u32
+        })?;
+
+    match ordinal {
+        Ordinal::First => {
+            Ok(week_start)
+        },
+        Ordinal::Last => {
+            Ok(week_start.checked_add_days(Days::new(6))
+                .ok_or(ProcessingError::AddToDate {
+                    unit: "days".to_string(),
+                    count: 6,
+                    date: NaiveDateTime::new(week_start, NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
+                })?)
+        },
+        Ordinal::Nth(n) => {
+            if *n < 1 || *n > 7 {
+                return Err(ProcessingError::InvalidDate {
+                    year: base_date.year(),
+                    month: base_date.month(),
+                    day: *n
+                });
+            }
+            Ok(week_start.checked_add_days(Days::new((*n - 1) as u64))
+                .ok_or(ProcessingError::AddToDate {
+                    unit: "days".to_string(),
+                    count: *n - 1,
+                    date: NaiveDateTime::new(week_start, NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
+                })?)
+        }
+    }
+}
+
+fn apply_ordinal_to_months(ordinal: &Ordinal, base_datetime: NaiveDateTime) -> Result<NaiveDate, ProcessingError> {
+    let base_date = base_datetime.date();
+    let target_month = match ordinal {
+        Ordinal::First => 1,
+        Ordinal::Last => 12,
+        Ordinal::Nth(n) => *n,
+    };
+
+    if target_month < 1 || target_month > 12 {
+        return Err(ProcessingError::InvalidDate {
+            year: base_date.year(),
+            month: target_month,
+            day: 1
+        });
+    }
+
+    NaiveDate::from_ymd_opt(base_date.year(), target_month, 1)
+        .ok_or(ProcessingError::InvalidDate {
+            year: base_date.year(),
+            month: target_month,
+            day: 1,
+        })
+}
+
+fn apply_ordinal_to_years(ordinal: &Ordinal, base_datetime: NaiveDateTime) -> Result<NaiveDate, ProcessingError> {
+    let base_date = base_datetime.date();
+    let target_year = base_date.year();
+
+    match ordinal {
+        Ordinal::First => {
+            NaiveDate::from_ymd_opt(target_year, 1, 1)
+                .ok_or(ProcessingError::InvalidDate {
+                    year: target_year,
+                    month: 1,
+                    day: 1,
+                })
+        },
+        Ordinal::Last => {
+            NaiveDate::from_ymd_opt(target_year, 12, 31)
+                .ok_or(ProcessingError::InvalidDate {
+                    year: target_year,
+                    month: 12,
+                    day: 31,
+                })
+        },
+        Ordinal::Nth(n) => {
+            let jan_1 = NaiveDate::from_ymd_opt(target_year, 1, 1)
+                .ok_or(ProcessingError::InvalidDate {
+                    year: target_year,
+                    month: 1,
+                    day: 1,
+                })?;
+
+            jan_1.checked_add_days(Days::new((*n - 1) as u64))
+                .ok_or(ProcessingError::AddToDate {
+                    unit: "days".to_string(),
+                    count: *n,
+                    date: NaiveDateTime::new(jan_1, NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
+                })
+        }
+    }
+}
+
+fn apply_ordinal_to_weeks_of_month(ordinal: &Ordinal, base_datetime: NaiveDateTime) -> Result<NaiveDate, ProcessingError> {
+    let base_date = base_datetime.date();
+    let first_of_month = NaiveDate::from_ymd_opt(base_date.year(), base_date.month(), 1)
+        .ok_or(ProcessingError::InvalidDate { year: base_date.year(), month: base_date.month(), day: 1 })?;
+
+    let week_number = match ordinal {
+        Ordinal::First => 1,
+        Ordinal::Last => {
+            let last_day = if base_date.month() == 12 {
+                NaiveDate::from_ymd_opt(base_date.year() + 1, 1, 1).unwrap() - Days::new(1)
+            } else {
+                NaiveDate::from_ymd_opt(base_date.year(), base_date.month() + 1, 1).unwrap() - Days::new(1)
+            };
+            ((last_day.day() - 1) / 7) + 1
+        },
+        Ordinal::Nth(n) => *n,
+    };
+
+    let target_date = first_of_month + Days::new(((week_number - 1) * 7) as u64);
+
+    if target_date.month() == base_date.month() {
+        Ok(target_date)
+    } else {
+        Err(ProcessingError::InvalidDate {
+            year: base_date.year(),
+            month: base_date.month(),
+            day: target_date.day()
+        })
+    }
+}
+
+fn apply_ordinal_to_subday_units(
+    _ordinal: &Ordinal,
+    _time_unit: &TimeUnit,
+    base_datetime: NaiveDateTime,
+) -> Result<NaiveDate, ProcessingError> {
+    Ok(base_datetime.date())
 }
