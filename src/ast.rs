@@ -22,7 +22,77 @@ fn parse_numeric_ordinal(s: &str) -> Option<u32> {
     }
 }
 
-fn parse_word_ordinal(s: &str) -> Option<u32> {
+fn parse_spelled_number(s: &str) -> Option<u32> {
+    match s {
+        "one" => Some(1),
+        "two" => Some(2),
+        "three" => Some(3),
+        "four" => Some(4),
+        "five" => Some(5),
+        "six" => Some(6),
+        "seven" => Some(7),
+        "eight" => Some(8),
+        "nine" => Some(9),
+        "ten" => Some(10),
+        "eleven" => Some(11),
+        "twelve" => Some(12),
+        "thirteen" => Some(13),
+        "fourteen" => Some(14),
+        "fifteen" => Some(15),
+        "sixteen" => Some(16),
+        "seventeen" => Some(17),
+        "eighteen" => Some(18),
+        "nineteen" => Some(19),
+        "twenty" => Some(20),
+        "thirty" => Some(30),
+        "forty" => Some(40),
+        "fifty" => Some(50),
+        "sixty" => Some(60),
+        "seventy" => Some(70),
+        "eighty" => Some(80),
+        "ninety" => Some(90),
+        "hundred" => Some(100),
+        _ => None,
+    }
+}
+
+fn parse_compound_ordinal_text(s: &str) -> Option<u32> {
+    // Handle compound ordinals like "three hundredth", "two hundred fiftieth"
+    if s.ends_with("hundredth") {
+        // "three hundredth" -> 300
+        let prefix = &s[..s.len() - 9]; // Remove "hundredth"
+        if let Some(hundreds) = parse_spelled_number(prefix) {
+            return Some(hundreds * 100);
+        }
+    }
+    
+    // Handle patterns like "three hundred fiftieth", "two hundred twenty first"
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() >= 3 && parts[1] == "hundred" {
+        if let Some(hundreds) = parse_spelled_number(parts[0]) {
+            let mut total = hundreds * 100;
+            
+            let mut i = 2;
+            // Skip optional "and"
+            if i < parts.len() && parts[i] == "and" {
+                i += 1;
+            }
+            
+            // Parse the ordinal part
+            if i < parts.len() {
+                let remaining = parts[i..].join(" ");
+                if let Some(ordinal) = parse_simple_ordinal(&remaining) {
+                    total += ordinal;
+                    return Some(total);
+                }
+            }
+        }
+    }
+    
+    None
+}
+
+fn parse_simple_ordinal(s: &str) -> Option<u32> {
     match s {
         "first" => Some(1),
         "second" => Some(2),
@@ -44,7 +114,6 @@ fn parse_word_ordinal(s: &str) -> Option<u32> {
         "eighteenth" => Some(18),
         "nineteenth" => Some(19),
         "twentieth" => Some(20),
-
         "thirtieth" => Some(30),
         "fortieth" => Some(40),
         "fiftieth" => Some(50),
@@ -52,9 +121,26 @@ fn parse_word_ordinal(s: &str) -> Option<u32> {
         "seventieth" => Some(70),
         "eightieth" => Some(80),
         "ninetieth" => Some(90),
-
-        _ => parse_compound_ordinal(s),
+        _ => {
+            // Handle compound forms like "twenty first", "thirty second"
+            parse_compound_ordinal(&s)
+        }
     }
+}
+
+fn parse_word_ordinal(s: &str) -> Option<u32> {
+    // First try compound ordinals (three hundredth, two hundred fiftieth)
+    if let Some(n) = parse_compound_ordinal_text(s) {
+        return Some(n);
+    }
+    
+    // Then try simple ordinals
+    if let Some(n) = parse_simple_ordinal(s) {
+        return Some(n);
+    }
+    
+    // Finally try the old compound logic for hyphenated forms
+    parse_compound_ordinal(s)
 }
 
 fn parse_compound_ordinal(s: &str) -> Option<u32> {
@@ -142,6 +228,8 @@ impl DateTimeParser {
             [IsoDate(iso)] => Date::IsoDate(iso),
             [Num(d), Month_Name(m), Num(y)] => Date::DayMonthYear(d, m, y),
             [Num(d), Month_Name(m)] => Date::DayMonth(d, m),
+            [MonthDurationFromNow((m, q))] => Date::MonthDurationFromNow(m, Duration(vec![q])),
+            [MonthDurationAgo((m, q))] => Date::MonthDurationAgo(m, Duration(vec![q])),
             [RelativeSpecifier(r), Week(_), Weekday(wd)] => Date::RelativeWeekWeekday(r, wd),
             [RelativeSpecifier(r), TimeUnit(tu)] => Date::RelativeTimeUnit(r, tu),
             [RelativeSpecifier(r), Weekday(wd)] => Date::RelativeWeekday(r, wd),
@@ -238,10 +326,24 @@ impl DateTimeParser {
     fn Num(input: Node) -> ParserResult<u32> {
         input.as_str().parse::<u32>().map_err(|e| input.error(e))
     }
+    
+    fn SpelledNum(input: Node) -> ParserResult<u32> {
+        parse_spelled_number(input.as_str())
+            .ok_or_else(|| input.error("Invalid spelled number"))
+    }
 
     fn Quantifier(input: Node) -> ParserResult<Quantifier> {
         Ok(match_nodes!(input.into_children();
             [Num(n), TimeUnit(u)] => match u {
+                TimeUnit::Year => Quantifier::Year(n),
+                TimeUnit::Month => Quantifier::Month(n),
+                TimeUnit::Week => Quantifier::Week(n),
+                TimeUnit::Day => Quantifier::Day(n),
+                TimeUnit::Hour => Quantifier::Hour(n),
+                TimeUnit::Minute => Quantifier::Minute(n),
+                TimeUnit::Second => Quantifier::Second(n),
+            },
+            [SpelledNum(n), TimeUnit(u)] => match u {
                 TimeUnit::Year => Quantifier::Year(n),
                 TimeUnit::Month => Quantifier::Month(n),
                 TimeUnit::Week => Quantifier::Week(n),
@@ -330,6 +432,18 @@ impl DateTimeParser {
         ))
     }
 
+    fn MonthDurationFromNow(input: Node) -> ParserResult<(Month, Quantifier)> {
+        Ok(match_nodes!(input.into_children();
+            [Month_Name(m), Quantifier(q)] => (m, q),
+        ))
+    }
+    
+    fn MonthDurationAgo(input: Node) -> ParserResult<(Month, Quantifier)> {
+        Ok(match_nodes!(input.into_children();
+            [Month_Name(m), Quantifier(q)] => (m, q),
+        ))
+    }
+
     fn Ordinal(input: Node) -> ParserResult<Ordinal> {
         let text = input.as_str();
         match text.to_ascii_lowercase().as_str() {
@@ -400,6 +514,8 @@ pub enum Date {
     RelativeWeekday(RelativeSpecifier, Weekday),
     UpcomingWeekday(Weekday),
     OrdinalTimeUnitOf(Ordinal, TimeUnit, DateTimeReference),
+    MonthDurationFromNow(Month, Duration),
+    MonthDurationAgo(Month, Duration),
 }
 
 #[derive(Debug)]

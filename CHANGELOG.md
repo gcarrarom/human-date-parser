@@ -13,10 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for spelled ordinals ("first", "second", "third", etc.) in addition to numeric ordinals ("1st", "2nd", "3rd")
 - "The" time unit references like "second day of the year", "third week of the month"
 - Configuration option to choose first day of the week (Sunday or Monday) via `from_human_time_with_config()`
-
-### Fixed
-
-- Fixed "day of week" patterns incorrectly resolving to month boundaries (e.g., "1st day of last week" now correctly returns Sunday of last week)
+- Support for spelled numbers in durations ("two years ago", "three months ago")
+- Complex month+duration patterns ("april 2 years from now", "december 3 years ago")
+- Comprehensive spelled number support (one through hundred)
 
 ## [0.3.1]
 

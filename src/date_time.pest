@@ -21,6 +21,8 @@ Date = {
     | IsoDate
     | Num ~ Month_Name ~ Num
     | Num ~ Month_Name
+    | MonthDurationFromNow
+    | MonthDurationAgo
     | RelativeSpecifier ~ Weekday
     | RelativeSpecifier ~ Week ~ Weekday
     | RelativeSpecifier ~ TimeUnit
@@ -66,8 +68,14 @@ Last = { "last" }
 AgoLiteral = _{ "ago" }
 AtLiteral  = _{ "at" }
 
-Quantifier = { Num ~ TimeUnit }
+Quantifier = { (Num | SpelledNum) ~ TimeUnit }
 Num = @{ ASCII_DIGIT+ }
+SpelledNum = @{ 
+    "one" | "two" | "three" | "four" | "five" | "six" | "seven" | "eight" | "nine" | "ten" |
+    "eleven" | "twelve" | "thirteen" | "fourteen" | "fifteen" | "sixteen" | "seventeen" | 
+    "eighteen" | "nineteen" | "twenty" | "thirty" | "forty" | "fifty" | "sixty" | "seventy" |
+    "eighty" | "ninety" | "hundred"
+}
 TimeUnit = {
     | Year
     | Month
@@ -194,6 +202,9 @@ OrdinalTimeUnitOf = {
     Ordinal ~ TimeUnit ~ "of" ~ DateTimeReference
 }
 
+MonthDurationFromNow = { Month_Name ~ Quantifier ~ "from" ~ "now" }
+MonthDurationAgo = { Month_Name ~ Quantifier ~ AgoLiteral }
+
 DateTimeReference = {
     | MonthSpec ~ YearSpec?
     | Duration ~ AgoLiteral
@@ -215,11 +226,13 @@ Ordinal = {
 NumericOrdinal = @{ ASCII_DIGIT+ ~ ("st" | "nd" | "rd" | "th") }
 
 WordOrdinal = _{
-    OneToTwenty
+    OneToTwenty                    // first, second, ... twentieth  
   | TensOrdinal                    // fortieth, fiftieth, etc.
   | Tens ~ "-"? ~ UnitOrdinal      // twenty-first
   | Tens ~ "ieth"                  // twentieth
 }
+
+Tens = @{ "twenty" | "thirty" | "forty" | "fifty" | "sixty" | "seventy" | "eighty" | "ninety" }
 
 OneToTwenty = @{
       "first" | "second" | "third" | "fourth" | "fifth"
@@ -228,7 +241,6 @@ OneToTwenty = @{
     | "sixteenth" | "seventeenth" | "eighteenth" | "nineteenth" | "twentieth"
 }
 
-Tens = @{ "twenty" | "thirty" | "forty" | "fifty" | "sixty" | "seventy" | "eighty" | "ninety" }
 TensOrdinal = @{ "thirtieth" | "fortieth" | "fiftieth" | "sixtieth" | "seventieth" | "eightieth" | "ninetieth" }
 UnitOrdinal = @{ "first" | "second" | "third" | "fourth" | "fifth" | "sixth" | "seventh" | "eighth" | "ninth" }
 

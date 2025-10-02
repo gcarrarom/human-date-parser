@@ -165,24 +165,29 @@ generate_test_cases!(
     "sixtieth day of the year" = "2010-03-01 00:00:00",
     "seventieth day of the year" = "2010-03-11 00:00:00",
     "eightieth day of the year" = "2010-03-21 00:00:00",
-    "ninetieth day of the year" = "2010-03-31 00:00:00"
+    "ninetieth day of the year" = "2010-03-31 00:00:00",
+    "two years ago" = "2008-01-01 00:00:00",
+    "three months ago" = "2009-10-01 00:00:00",
+    "april 2 years from now" = "2012-04-01 00:00:00",
+    "december 3 years ago" = "2007-12-01 00:00:00",
+    "january five years from now" = "2015-01-01 00:00:00"
 );
 
 #[test]
 fn test_week_start_monday_config() {
     let now = NaiveDateTime::new(
-        NaiveDate::from_ymd_opt(2010, 1, 1).unwrap(), 
+        NaiveDate::from_ymd_opt(2010, 1, 1).unwrap(),
         NaiveTime::from_hms_opt(0, 0, 0).unwrap()
     );
-    
+
     let config = crate::ParseConfig {
         week_start_day: crate::WeekStartDay::Monday,
     };
-    
+
     // With Monday as first day, "1st day of last week" should be Monday
     let result = crate::from_human_time_with_config("1st day of last week", now, config).unwrap();
     let expected = NaiveDateTime::parse_from_str("2009-12-21 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
-    
+
     if let crate::ParseResult::Date(date) = result {
         let result_dt = NaiveDateTime::new(date, NaiveTime::from_hms_opt(0, 0, 0).unwrap());
         assert!((result_dt - expected).abs() < chrono::Duration::milliseconds(10));
@@ -194,18 +199,18 @@ fn test_week_start_monday_config() {
 #[test]
 fn test_week_start_sunday_config() {
     let now = NaiveDateTime::new(
-        NaiveDate::from_ymd_opt(2010, 1, 1).unwrap(), 
+        NaiveDate::from_ymd_opt(2010, 1, 1).unwrap(),
         NaiveTime::from_hms_opt(0, 0, 0).unwrap()
     );
-    
+
     let config = crate::ParseConfig {
         week_start_day: crate::WeekStartDay::Sunday,
     };
-    
+
     // With Sunday as first day, "1st day of last week" should be Sunday
     let result = crate::from_human_time_with_config("1st day of last week", now, config).unwrap();
     let expected = NaiveDateTime::parse_from_str("2009-12-20 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
-    
+
     if let crate::ParseResult::Date(date) = result {
         let result_dt = NaiveDateTime::new(date, NaiveTime::from_hms_opt(0, 0, 0).unwrap());
         assert!((result_dt - expected).abs() < chrono::Duration::milliseconds(10));

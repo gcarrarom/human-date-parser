@@ -271,6 +271,12 @@ fn parse_date(date: Date, now: &NaiveDateTime, config: ParseConfig) -> Result<Na
         Date::OrdinalTimeUnitOf(ordinal, time_unit, datetime_reference) => {
             parse_ordinal_time_unit_of(&ordinal, &time_unit, &datetime_reference, now, config)
         }
+        Date::MonthDurationFromNow(month, duration) => {
+            parse_month_duration_from_now(&month, &duration, now)
+        }
+        Date::MonthDurationAgo(month, duration) => {
+            parse_month_duration_ago(&month, &duration, now)
+        }
     }
 }
 
@@ -553,7 +559,7 @@ fn parse_ordinal_time_unit_of(
     now: &NaiveDateTime,
     config: ParseConfig,
 ) -> Result<NaiveDate, ProcessingError> {
-    let base_datetime = resolve_datetime_reference(datetime_reference, now)?;
+    let base_datetime = resolve_datetime_reference(datetime_reference, now, config)?;
 
     if let (TimeUnit::Day, DateTimeReference::RelativeTimeUnit(_, TimeUnit::Year)) = (time_unit, datetime_reference) {
         return apply_ordinal_to_years(ordinal, base_datetime);
@@ -589,8 +595,40 @@ fn parse_ordinal_time_unit_of(
 fn resolve_datetime_reference(
     datetime_reference: &DateTimeReference,
     now: &NaiveDateTime,
+    config: ParseConfig,
 ) -> Result<NaiveDateTime, ProcessingError> {
     match datetime_reference {
+        DateTimeReference::Today => {
+            let date = parse_date(Date::Today, now, config)?;
+            Ok(NaiveDateTime::new(date, NaiveTime::from_hms_opt(0, 0, 0).unwrap()))
+        },
+        DateTimeReference::Tomorrow => {
+            let date = parse_date(Date::Tomorrow, now, config)?;
+            Ok(NaiveDateTime::new(date, NaiveTime::from_hms_opt(0, 0, 0).unwrap()))
+        },
+        DateTimeReference::Yesterday => {
+            let date = parse_date(Date::Yesterday, now, config)?;
+            Ok(NaiveDateTime::new(date, NaiveTime::from_hms_opt(0, 0, 0).unwrap()))
+        },
+        DateTimeReference::Overmorrow => {
+            let date = parse_date(Date::Overmorrow, now, config)?;
+            Ok(NaiveDateTime::new(date, NaiveTime::from_hms_opt(0, 0, 0).unwrap()))
+        },
+        DateTimeReference::Now => Ok(*now),
+
+        DateTimeReference::RelativeTimeUnit(relative, time_unit) => {
+            Ok(relative_date_time_unit(*relative, *time_unit, *now)?)
+        },
+
+        DateTimeReference::TheTimeUnit(_time_unit) => {
+            Ok(*now)
+        },
+
+        DateTimeReference::Ago(duration) => {
+            apply_duration(duration.clone(), *now, Direction::Backwards)
+                .map_err(|_| ProcessingError::SubtractFromNow { unit: "duration".to_string(), count: 1 })
+        },
+
         DateTimeReference::MonthYear(month_spec, year_spec) => {
             let target_year = match year_spec {
                 None => now.year(),
@@ -645,27 +683,6 @@ fn resolve_datetime_reference(
                 NaiveTime::from_hms_opt(0, 0, 0).unwrap()
             ))
         },
-        DateTimeReference::Ago(duration) => {
-            apply_duration(duration.clone(), *now, Direction::Backwards)
-                .map_err(|_| ProcessingError::SubtractFromNow { unit: "duration".to_string(), count: 1 })
-        },
-        DateTimeReference::RelativeTimeUnit(relative, time_unit) => {
-            Ok(relative_date_time_unit(*relative, *time_unit, *now)?)
-        },
-        DateTimeReference::TheTimeUnit(_time_unit) => {
-            Ok(*now)
-        },
-        DateTimeReference::Today => Ok(*now),
-        DateTimeReference::Tomorrow => {
-            Ok(*now + ChronoDuration::days(1))
-        },
-        DateTimeReference::Yesterday => {
-            Ok(*now - ChronoDuration::days(1))
-        },
-        DateTimeReference::Overmorrow => {
-            Ok(*now + ChronoDuration::days(2))
-        },
-        DateTimeReference::Now => Ok(*now),
     }
 }
 
@@ -802,6 +819,36 @@ fn apply_ordinal_to_years(ordinal: &Ordinal, base_datetime: NaiveDateTime) -> Re
                 })
         }
     }
+}
+
+fn parse_month_duration_from_now(month: &Month, duration: &AstDuration, now: &NaiveDateTime) -> Result<NaiveDate, ProcessingError> {
+    // This is like "april 2 years from now"
+    // First apply the duration to get the target year, then get the first day of that month in that year
+    let target_datetime = apply_duration(duration.clone(), *now, Direction::Forwards)?;
+    let target_year = target_datetime.year();
+    let target_month = month.number_from_month();
+    
+    NaiveDate::from_ymd_opt(target_year, target_month, 1)
+        .ok_or(ProcessingError::InvalidDate { 
+            year: target_year, 
+            month: target_month, 
+            day: 1 
+        })
+}
+
+fn parse_month_duration_ago(month: &Month, duration: &AstDuration, now: &NaiveDateTime) -> Result<NaiveDate, ProcessingError> {
+    // This is like "december 3 years ago"  
+    // First apply the duration backwards to get the target year, then get the first day of that month in that year
+    let target_datetime = apply_duration(duration.clone(), *now, Direction::Backwards)?;
+    let target_year = target_datetime.year();
+    let target_month = month.number_from_month();
+    
+    NaiveDate::from_ymd_opt(target_year, target_month, 1)
+        .ok_or(ProcessingError::InvalidDate { 
+            year: target_year, 
+            month: target_month, 
+            day: 1 
+        })
 }
 
 fn apply_ordinal_to_weeks_of_month(ordinal: &Ordinal, base_datetime: NaiveDateTime) -> Result<NaiveDate, ProcessingError> {
